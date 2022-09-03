@@ -1,4 +1,3 @@
-from msvcrt import kbhit
 from typing import List
 
 from dagster import (
@@ -10,6 +9,7 @@ from dagster import (
     RunRequest,
     ScheduleDefinition,
     SkipReason,
+    get_dagster_logger,
     graph,
     op,
     sensor,
@@ -50,7 +50,7 @@ def process_data(stocks):
 @op(
     required_resource_keys={"redis"},
     ins={"highest_value": In(dagster_type=Aggregation)},
-    tags={"kind": "redit"},
+    tags={"kind": "redis"},
 )
 def put_redis_data(context, highest_value):
     redis = context.resources.redis
@@ -64,7 +64,7 @@ def put_redis_data(context, highest_value):
 def week_3_pipeline():
     put_redis_data(process_data(get_s3_data()))
     
-
+    
 local = {
     "ops": {"get_s3_data": {"config": {"s3_key": "prefix/stock_9.csv"}}},
 }
@@ -90,9 +90,16 @@ docker = {
     "ops": {"get_s3_data": {"config": {"s3_key": "prefix/stock_9.csv"}}},
 }
 
+partition_keys = [str(i) for i in range(1, 11)]
 
-def docker_config():
-    pass
+
+@static_partitioned_config(partition_keys=partition_keys)
+def docker_config(partition_key: str):
+    key = f'prefix/stock_{partition_key}.csv'
+    return {
+        "resources": {**docker["resources"]},
+        "ops": {"get_s3_data": {"config": {"s3_key": key}}}
+    }
 
 
 local_week_3_pipeline = week_3_pipeline.to_job(
@@ -111,14 +118,32 @@ docker_week_3_pipeline = week_3_pipeline.to_job(
         "s3": s3_resource,
         "redis": redis_resource,
     },
+    op_retry_policy=RetryPolicy(max_retries=10, delay=1)
 )
 
 
-local_week_3_schedule = None  # Add your schedule
+local_week_3_schedule = ScheduleDefinition(job=local_week_3_pipeline, cron_schedule="*/15 * * * *") 
 
-docker_week_3_schedule = None  # Add your schedule
+docker_week_3_schedule = ScheduleDefinition(job=docker_week_3_pipeline, cron_schedule="0 * * * *") 
 
+bucket, access_key, secrect_key, endpoint_url =  docker["resources"]["s3"]["config"].values()
+print(endpoint_url)
 
-@sensor
-def docker_week_3_sensor():
-    pass
+@sensor(job=docker_week_3_pipeline, minimum_interval_seconds=30)
+def docker_week_3_sensor(context):
+    new_files = get_s3_keys(bucket=bucket, 
+                            prefix='prefix', 
+                            endpoint_url=endpoint_url)
+    log = get_dagster_logger()
+    log.info(f'RunRequest for {new_files}')
+    if not new_files:
+        yield SkipReason("No new s3 files found in bucket.")
+        return
+    for new_file in new_files:
+        yield RunRequest(
+            run_key=new_file,
+            run_config={
+                "resources": {**docker["resources"]},
+                "ops": {"get_s3_data": {"config": {"s3_key": new_file}}}
+            }
+        )
