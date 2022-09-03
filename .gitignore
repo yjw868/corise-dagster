@@ -162,4 +162,4 @@ tmp*
 
 dbt.log.*
 
-solutions/*
+solutions/
