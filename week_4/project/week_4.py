@@ -1,6 +1,6 @@
 from typing import List
 
-from dagster import AssetIn, Nothing, asset, with_resources
+from dagster import Nothing, asset, with_resources
 from project.resources import redis_resource, s3_resource
 from project.types import Aggregation, Stock
 
@@ -31,6 +31,7 @@ def process_data(get_s3_data):
 @asset(
     required_resource_keys={"redis"},
     group_name="corise",
+    description="Take the list of stocks and determine the Stock with the greatest high value"
 )
 def put_redis_data(context, process_data):
     highest_value = process_data

@@ -2,3 +2,6 @@ ops:
     get_s3_data:
         config:
             s3_key: prefix/stock_1.csv
+    create_table:
+        config:
+            table_name: foo
