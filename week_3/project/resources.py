@@ -33,6 +33,12 @@ class S3:
             yield record
 
 
+    def get_keys(self):
+        keys=[]
+        for key in self.client.list_objects(Bucket=self.bucket)['Contents']:
+            keys.append(key['Key'])
+        return(keys)
+
 class Redis:
     def __init__(self, host: str, port: int):
         self.client = redis.Redis(host=host, port=port)
